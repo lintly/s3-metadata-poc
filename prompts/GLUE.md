@@ -1,6 +1,7 @@
 # Glue Creation
 Ask me about anything that you are not sure of.
-Update the current terraform configuration in the "terraform" directory.
+Use OpenTofu for building out the terraform configuration in the "terraform" directory.
+Update the current terraform configuration to include the necessary resources for the Glue database, table, and crawler.
 
 ## Set up AWS Glue DB + Table
 Create an AWS Glue database named "jeff-poc".
