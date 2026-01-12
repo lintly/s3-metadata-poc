@@ -6,8 +6,8 @@ Validate linting and formatting.
 
 Use .env file for all environment variables.
 Set the .env file with the following variables:
-- VITE_AWS_ACCESS_KEY_ID=ASIAVA5YK4SELO2S7EW5
-- VITE_AWS_SECRET_ACCESS_KEY=R4CJVMufNplUtaW/7vxzg15MCJkks7hEFZhautwb
+- VITE_AWS_ACCESS_KEY_ID=
+- VITE_AWS_SECRET_ACCESS_KEY=
 - VITE_S3_BUCKET_NAME=jeff-poc-meta
 - VITE_AWS_REGION=us-west-2
 - VITE_S3_BUCKET_REGION=us-west-2
