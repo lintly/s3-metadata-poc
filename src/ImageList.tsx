@@ -83,7 +83,12 @@ export default function ImageList() {
           if (!obj.Key || !obj.VersionId) return null;
 
           try {
-            console.log("Fetching metadata for:", obj.Key, "VersionId:", obj.VersionId);
+            console.log(
+              "Fetching metadata for:",
+              obj.Key,
+              "VersionId:",
+              obj.VersionId,
+            );
             const headCommand = new HeadObjectCommand({
               Bucket: import.meta.env.VITE_S3_BUCKET_NAME,
               Key: obj.Key,
@@ -454,7 +459,7 @@ export default function ImageList() {
           <div
             style={{
               position: "relative",
-              maxWidth: "95%",
+              maxWidth: "500px",
               maxHeight: "95vh",
               width: "100%",
               backgroundColor: "#454545",
