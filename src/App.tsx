@@ -13,18 +13,28 @@ function App() {
       style={{
         minHeight: "100vh",
         backgroundColor: "#595959",
-        width: "1000px",
+        maxWidth: "1200px",
+        margin: "0 auto",
+        width: "100%",
       }}
     >
       <header
         style={{
           backgroundColor: "#282c34",
-          padding: "20px",
+          padding: "15px 20px",
           color: "white",
           boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
         }}
       >
-        <h1 style={{ margin: 0, textAlign: "center" }}>S3 Metadata POC</h1>
+        <h1
+          style={{
+            margin: 0,
+            textAlign: "center",
+            fontSize: "clamp(1.5rem, 5vw, 2.5rem)",
+          }}
+        >
+          S3 Metadata POC
+        </h1>
       </header>
 
       {/* Tab Navigation */}
@@ -40,7 +50,9 @@ function App() {
         <button
           onClick={() => setActiveTab("upload")}
           style={{
-            padding: "15px 30px",
+            padding: "12px 20px",
+            flex: "1",
+            minWidth: "100px",
             backgroundColor: activeTab === "upload" ? "#007bff" : "transparent",
             color: activeTab === "upload" ? "white" : "#6c757d",
             border: "none",
@@ -59,7 +71,9 @@ function App() {
         <button
           onClick={() => setActiveTab("list")}
           style={{
-            padding: "15px 30px",
+            padding: "12px 20px",
+            flex: "1",
+            minWidth: "100px",
             backgroundColor: activeTab === "list" ? "#007bff" : "transparent",
             color: activeTab === "list" ? "white" : "#6c757d",
             border: "none",
@@ -80,10 +94,12 @@ function App() {
       {/* Tab Content */}
       <main
         style={{
+          width: "100%",
           maxWidth: "1200px",
           margin: "0 auto",
-          padding: "20px",
+          padding: "10px",
           backgroundColor: "#282c34",
+          boxSizing: "border-box",
         }}
       >
         {activeTab === "upload" && <ImageUploader />}

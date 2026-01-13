@@ -230,13 +230,16 @@ export default function ImageList() {
   }
 
   return (
-    <div style={{ padding: "20px" }}>
+    <div style={{ padding: "15px", boxSizing: "border-box" }}>
       <div
         style={{
           display: "flex",
+          flexDirection: "row",
+          flexWrap: "wrap",
           justifyContent: "space-between",
           alignItems: "center",
           marginBottom: "20px",
+          gap: "10px",
         }}
       >
         <h2>Image/Video List ({objects.length} items)</h2>
@@ -256,10 +259,11 @@ export default function ImageList() {
         </button>
       </div>
 
-      <div style={{ overflowX: "auto" }}>
+      <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
         <table
           style={{
             width: "100%",
+            minWidth: "600px",
             borderCollapse: "collapse",
             backgroundColor: "white",
             boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
@@ -450,12 +454,15 @@ export default function ImageList() {
           <div
             style={{
               position: "relative",
-              maxWidth: "90%",
-              maxHeight: "90%",
+              maxWidth: "95%",
+              maxHeight: "95vh",
+              width: "100%",
               backgroundColor: "#454545",
               borderRadius: "8px",
-              padding: "20px",
+              padding: "15px",
               boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+              overflowY: "auto",
+              boxSizing: "border-box",
             }}
             onClick={(e) => e.stopPropagation()}
           >

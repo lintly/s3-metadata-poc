@@ -181,7 +181,14 @@ export default function ImageViewer({
   };
 
   return (
-    <div style={{ minWidth: "600px", maxWidth: "900px" }}>
+    <div
+      style={{
+        width: "100%",
+        maxWidth: "900px",
+        minWidth: "280px",
+        boxSizing: "border-box",
+      }}
+    >
       <h2 style={{ marginTop: 0, marginBottom: "20px" }}>Image/Video Viewer</h2>
 
       {/* Display Image or Video */}
@@ -278,13 +285,15 @@ export default function ImageViewer({
           rows={4}
           style={{
             display: "block",
-            width: "90%",
+            width: "100%",
+            maxWidth: "100%",
             padding: "10px",
             border: "1px solid #ced4da",
             borderRadius: "4px",
             fontFamily: "inherit",
             fontSize: "14px",
             resize: "vertical",
+            boxSizing: "border-box",
           }}
           placeholder="Enter a description for this file..."
         />
@@ -348,7 +357,8 @@ export default function ImageViewer({
               padding: "8px",
               border: "1px solid #ced4da",
               borderRadius: "4px",
-              width: "90%",
+              width: "100%",
+              boxSizing: "border-box",
             }}
           />
           {newFile && (

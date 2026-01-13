@@ -24,10 +24,9 @@ a:hover {
 
 body {
   margin: 0;
-  display: flex;
-  place-items: center;
   min-width: 320px;
   min-height: 100vh;
+  overflow-x: hidden;
 }
 
 h1 {
@@ -64,5 +63,28 @@ button:focus-visible {
   }
   button {
     background-color: #f9f9f9;
+  }
+}
+
+/* Mobile responsive styles */
+@media (max-width: 768px) {
+  h1 {
+    font-size: 2em;
+  }
+
+  h2 {
+    font-size: 1.5em;
+  }
+
+  button {
+    min-height: 44px;
+    padding: 0.8em 1em;
+    font-size: 0.95em;
+  }
+
+  input[type="file"],
+  textarea,
+  input[type="text"] {
+    font-size: 16px; /* Prevents zoom on iOS */
   }
 }

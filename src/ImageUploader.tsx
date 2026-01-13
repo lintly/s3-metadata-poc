@@ -275,14 +275,16 @@ export default function ImageUploader() {
   return (
     <div
       style={{
-        width: "1000px",
+        width: "100%",
+        maxWidth: "1000px",
         margin: "0 auto",
-        padding: "20px",
+        padding: "15px",
+        boxSizing: "border-box",
       }}
     >
       <h2>Upload Image or Video</h2>
       <form onSubmit={handleSubmit}>
-        <div style={{ marginBottom: "20px", width: "80%" }}>
+        <div style={{ marginBottom: "20px", width: "100%" }}>
           <label
             htmlFor="file-input"
             style={{
@@ -321,7 +323,7 @@ export default function ImageUploader() {
           )}
         </div>
 
-        <div style={{ marginBottom: "20px", width: "80%" }}>
+        <div style={{ marginBottom: "20px", width: "100%" }}>
           <label
             htmlFor="description"
             style={{
