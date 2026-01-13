@@ -21,6 +21,8 @@ variable "cors_allowed_origins" {
   type        = list(string)
   default = [
     "http://localhost:5173",
+    "http://localhost:4173",
+    "http://localhost:3000",
     "https://s3upload.d1cusxywbulok7.amplifyapp.com"
   ]
 }

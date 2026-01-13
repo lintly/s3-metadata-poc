@@ -34,3 +34,28 @@ output "bucket_endpoint" {
   description = "S3 bucket endpoint URL"
   value       = "https://${aws_s3_bucket.metadata_poc.bucket}.s3.${aws_s3_bucket.metadata_poc.region}.amazonaws.com"
 }
+
+output "glue_database_name" {
+  description = "Name of the Glue database"
+  value       = aws_glue_catalog_database.metadata_db.name
+}
+
+output "glue_table_name" {
+  description = "Name of the Glue inventory table"
+  value       = aws_glue_catalog_table.inventory_metadata.name
+}
+
+output "athena_workgroup_name" {
+  description = "Name of the Athena workgroup"
+  value       = aws_athena_workgroup.metadata_workgroup.name
+}
+
+output "athena_results_bucket" {
+  description = "S3 bucket for Athena query results"
+  value       = aws_s3_bucket.athena_results.bucket
+}
+
+output "inventory_table_location" {
+  description = "Warehouse location of the S3 Tables inventory"
+  value       = data.external.inventory_table_location.result.warehouse_location
+}
