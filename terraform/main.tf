@@ -388,6 +388,11 @@ resource "aws_glue_catalog_table" "inventory" {
       name = "object_owner"
       type = "string"
     }
+    columns {
+      name = "user_metadata"
+      type = "map<string,string>"
+      comment = "User-defined metadata key-value pairs (x-amz-meta-* headers)"
+    }
 
     ser_de_info {
       serialization_library = "org.apache.iceberg.mr.hive.HiveIcebergSerDe"
