@@ -25,7 +25,7 @@ resource "aws_s3_bucket_cors_configuration" "metadata_poc" {
     allowed_headers = ["*"]
     allowed_methods = ["GET", "PUT", "POST", "DELETE", "HEAD"]
     allowed_origins = var.cors_allowed_origins
-    expose_headers  = [
+    expose_headers = [
       "ETag",
       "x-amz-server-side-encryption",
       "x-amz-request-id",
@@ -154,7 +154,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "athena_results" {
 
 # AWS Glue Database
 resource "aws_glue_catalog_database" "metadata_db" {
-  name        = "jeff-poc"
+  name        = "${var.bucket_name}-glue-db"
   description = "Glue database for S3 metadata tables"
 }
 
@@ -267,9 +267,9 @@ resource "aws_glue_catalog_table" "inventory_metadata" {
   table_type = "EXTERNAL_TABLE"
 
   parameters = {
-    "table_type"        = "ICEBERG"
-    "EXTERNAL"          = "TRUE"
-    "iceberg.catalog"   = "glue"
+    "table_type"      = "ICEBERG"
+    "EXTERNAL"        = "TRUE"
+    "iceberg.catalog" = "glue"
   }
 
   storage_descriptor {
@@ -373,16 +373,67 @@ resource "aws_glue_catalog_table" "inventory_metadata" {
     }
 
     columns {
-      name = "user_metadata"
-      type = "string"
+      name    = "user_metadata"
+      type    = "string"
       comment = "JSON string containing user-defined metadata"
     }
   }
 }
 
+# AWS Glue Crawler for Inventory Table
+resource "aws_glue_crawler" "inventory_crawler" {
+  name          = "${var.bucket_name}-inventory-crawler"
+  description   = "Crawler for S3 Tables inventory metadata"
+  role          = aws_iam_role.glue_crawler_role.arn
+  database_name = aws_glue_catalog_database.metadata_db.name
+
+  iceberg_target {
+    paths = [data.external.inventory_table_location.result.warehouse_location]
+
+    # Maximum traversal depth
+    maximum_traversal_depth = 3
+  }
+
+  # Run the crawler on a schedule (every 1 minute)
+  schedule = "cron(0/1 * * * ? *)"
+
+  # Schema change policy
+  schema_change_policy {
+    delete_behavior = "LOG"
+    update_behavior = "UPDATE_IN_DATABASE"
+  }
+
+  # Configuration for the crawler
+  configuration = jsonencode({
+    Version = 1.0
+    CrawlerOutput = {
+      Partitions = {
+        AddOrUpdateBehavior = "InheritFromTable"
+      }
+      Tables = {
+        AddOrUpdateBehavior = "MergeNewColumns"
+      }
+    }
+    Grouping = {
+      TableGroupingPolicy = "CombineCompatibleSchemas"
+    }
+  })
+
+  tags = {
+    Name        = "${var.bucket_name}-inventory-crawler"
+    Description = "Crawls S3 Tables inventory data"
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.glue_service_policy,
+    aws_iam_role_policy_attachment.glue_crawler_policy_attachment,
+    aws_glue_catalog_table.inventory_metadata
+  ]
+}
+
 # Athena Workgroup
 resource "aws_athena_workgroup" "metadata_workgroup" {
-  name        = "jeff-poc-metadata-workgroup"
+  name        = "${var.bucket_name}-workgroup"
   description = "Workgroup for querying S3 metadata tables"
 
   configuration {
@@ -395,6 +446,6 @@ resource "aws_athena_workgroup" "metadata_workgroup" {
   }
 
   tags = {
-    Name = "jeff-poc-metadata-workgroup"
+    Name = "${var.bucket_name}-metadata-workgroup"
   }
 }

@@ -7,13 +7,13 @@ variable "aws_region" {
 variable "bucket_name" {
   description = "Name of the S3 bucket"
   type        = string
-  default     = "jeff-meta-poc"
+  default     = "jeff-poc-barg"
 }
 
 variable "environment" {
   description = "Environment name for resource tagging"
   type        = string
-  default     = "development"
+  default     = "sandbox"
 }
 
 variable "cors_allowed_origins" {
