@@ -1,6 +1,7 @@
 # S3 Bucket
 resource "aws_s3_bucket" "metadata_poc" {
-  bucket = var.bucket_name
+  bucket        = var.bucket_name
+  force_destroy = true
 
   tags = {
     Name        = var.bucket_name
@@ -117,6 +118,107 @@ resource "aws_iam_policy" "s3_webapp_policy" {
           "s3:ListTagsForResource"
         ]
         Resource = aws_s3_bucket.metadata_poc.arn
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "athena:StartQueryExecution",
+          "athena:GetQueryExecution",
+          "athena:GetQueryResults",
+          "athena:StopQueryExecution"
+        ]
+        Resource = [
+          aws_athena_workgroup.metadata_workgroup.arn
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "glue:GetDatabase",
+          "glue:GetTable",
+          "glue:GetPartitions"
+        ]
+        Resource = [
+          "arn:aws:glue:${var.aws_region}:*:catalog",
+          "arn:aws:glue:${var.aws_region}:*:database/${aws_glue_catalog_database.metadata_db.name}",
+          "arn:aws:glue:${var.aws_region}:*:table/${aws_glue_catalog_database.metadata_db.name}/${aws_glue_catalog_table.inventory_metadata.name}"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:ListBucket",
+          "s3:PutObject",
+          "s3:GetBucketLocation"
+        ]
+        Resource = [
+          aws_s3_bucket.athena_results.arn,
+          "${aws_s3_bucket.athena_results.arn}/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetBucketLocation"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          "arn:aws:s3:::aws-s3-metadata-table-*",
+          "arn:aws:s3:::aws-s3-metadata-table-*/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:ListBucket",
+          "s3:GetObjectVersion"
+        ]
+        Resource = [
+          "arn:aws:s3:${var.aws_region}:*:accesspoint/*",
+          "arn:aws:s3:${var.aws_region}:*:accesspoint/*/object/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:ListBucket",
+          "s3:GetObjectVersion"
+        ]
+        Resource = [
+          "arn:aws:s3:::*--table-s3",
+          "arn:aws:s3:::*--table-s3/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3tables:GetTableBucket",
+          "s3tables:GetTable",
+          "s3tables:GetTableMetadataLocation",
+          "s3tables:ListTables",
+          "s3tables:GetNamespace",
+          "s3tables:ListNamespaces",
+          "s3tables:GetTablePolicy",
+          "s3tables:GetTableData"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "lakeformation:GetDataAccess"
+        ]
+        Resource = "*"
       }
     ]
   })
@@ -130,7 +232,8 @@ resource "aws_iam_user_policy_attachment" "s3_webapp_user" {
 
 # S3 Bucket for Athena Query Results
 resource "aws_s3_bucket" "athena_results" {
-  bucket = "${var.bucket_name}-athena-results"
+  bucket        = "${var.bucket_name}-athena-results"
+  force_destroy = true
 
   tags = {
     Name        = "${var.bucket_name}-athena-results"
@@ -398,3 +501,4 @@ resource "aws_athena_workgroup" "metadata_workgroup" {
     Name = "jeff-poc-metadata-workgroup"
   }
 }
+

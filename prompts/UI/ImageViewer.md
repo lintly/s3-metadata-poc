@@ -3,6 +3,7 @@ Use React and TypeScript for the UI updates.
 We will use AWS SDK for S3 operations.
 Follow all standards for React and TypeScript.
 Validate linting and formatting.
+Ask me about anything that you are not sure of.
 
 Use .env file for all environment variables.
 Set the .env file with the following variables:
