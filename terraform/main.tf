@@ -158,6 +158,27 @@ resource "aws_glue_catalog_database" "metadata_db" {
   description = "Glue database for S3 metadata tables"
 }
 
+# Lake Formation Permissions for Glue Crawler - Database access
+resource "aws_lakeformation_permissions" "crawler_database" {
+  principal   = aws_iam_role.glue_crawler_role.arn
+  permissions = ["CREATE_TABLE", "ALTER", "DROP"]
+
+  database {
+    name = aws_glue_catalog_database.metadata_db.name
+  }
+
+  depends_on = [
+    aws_glue_catalog_database.metadata_db,
+    aws_iam_role.glue_crawler_role
+  ]
+}
+
+# Note: Lake Formation permissions for the inventory table are handled at the
+# database level via aws_lakeformation_permissions.crawler_database resource
+
+# Data source for current AWS account ID
+data "aws_caller_identity" "current" {}
+
 # IAM Role for Glue Crawler
 resource "aws_iam_role" "glue_crawler_role" {
   name = "${var.bucket_name}-glue-crawler-role"
@@ -242,7 +263,7 @@ resource "aws_iam_role_policy_attachment" "glue_crawler_policy_attachment" {
   policy_arn = aws_iam_policy.glue_crawler_policy.arn
 }
 
-# Data source to get S3 Tables inventory warehouse location
+# Data source to get S3 Tables inventory metadata and warehouse location
 data "external" "inventory_table_location" {
   program = ["bash", "-c", <<-EOF
     RESULT=$(aws s3tables get-table-metadata-location \
@@ -251,25 +272,34 @@ data "external" "inventory_table_location" {
       --name "inventory" \
       --region ${var.aws_region} \
       --output json)
-    echo $RESULT | jq '{warehouse_location: .warehouseLocation}'
+    # Extract both warehouse location and metadata location
+    WAREHOUSE=$(echo $RESULT | jq -r '.warehouseLocation')
+    METADATA=$(echo $RESULT | jq -r '.metadataLocation')
+    echo "{\"warehouse_location\": \"$WAREHOUSE\", \"metadata_location\": \"$METADATA\"}"
   EOF
   ]
 
   depends_on = [aws_s3_bucket_metadata_configuration.upload]
 }
 
-# AWS Glue Catalog Table for Inventory
-resource "aws_glue_catalog_table" "inventory_metadata" {
-  name          = "inventory_metadata"
+# Note: For AWS-managed S3 Tables (type=aws), we create the Glue table manually
+# pointing to the metadata location instead of using a crawler. The crawler
+# doesn't properly discover AWS-managed Iceberg tables in S3 Tables buckets.
+
+# Glue Catalog Table for S3 Tables Inventory
+# For AWS-managed S3 Tables, we need to use a different approach
+resource "aws_glue_catalog_table" "inventory" {
+  name          = "inventory"
   database_name = aws_glue_catalog_database.metadata_db.name
-  description   = "S3 bucket inventory metadata table"
 
   table_type = "EXTERNAL_TABLE"
 
   parameters = {
-    "table_type"      = "ICEBERG"
-    "EXTERNAL"        = "TRUE"
-    "iceberg.catalog" = "glue"
+    "table_type"            = "ICEBERG"
+    "metadata_location"     = data.external.inventory_table_location.result.metadata_location
+    "EXTERNAL"              = "TRUE"
+    "iceberg.catalog"       = "glue"
+    "bucketing_version"     = "2"
   }
 
   storage_descriptor {
@@ -277,159 +307,103 @@ resource "aws_glue_catalog_table" "inventory_metadata" {
     input_format  = "org.apache.iceberg.mr.hive.HiveIcebergInputFormat"
     output_format = "org.apache.iceberg.mr.hive.HiveIcebergOutputFormat"
 
-    ser_de_info {
-      name                  = "icebergSerde"
-      serialization_library = "org.apache.iceberg.mr.hive.HiveIcebergSerDe"
-    }
-
+    # Define columns from Iceberg schema
     columns {
       name = "bucket"
       type = "string"
     }
-
     columns {
       name = "key"
       type = "string"
     }
-
+    columns {
+      name = "sequence_number"
+      type = "string"
+    }
     columns {
       name = "version_id"
       type = "string"
     }
-
-    columns {
-      name = "is_latest"
-      type = "boolean"
-    }
-
     columns {
       name = "is_delete_marker"
       type = "boolean"
     }
-
-    columns {
-      name = "last_modified_date"
-      type = "timestamp"
-    }
-
-    columns {
-      name = "e_tag"
-      type = "string"
-    }
-
     columns {
       name = "size"
       type = "bigint"
     }
-
+    columns {
+      name = "last_modified_date"
+      type = "timestamp"
+    }
+    columns {
+      name = "e_tag"
+      type = "string"
+    }
     columns {
       name = "storage_class"
       type = "string"
     }
-
     columns {
       name = "is_multipart_uploaded"
       type = "boolean"
     }
-
+    columns {
+      name = "replication_status"
+      type = "string"
+    }
     columns {
       name = "encryption_status"
       type = "string"
     }
-
     columns {
       name = "object_lock_retain_until_date"
       type = "timestamp"
     }
-
     columns {
       name = "object_lock_mode"
       type = "string"
     }
-
     columns {
       name = "object_lock_legal_hold_status"
       type = "string"
     }
-
     columns {
       name = "intelligent_tiering_access_tier"
       type = "string"
     }
-
     columns {
-      name = "bucket_key_enabled"
-      type = "boolean"
+      name = "bucket_key_status"
+      type = "string"
     }
-
     columns {
       name = "checksum_algorithm"
       type = "string"
     }
-
     columns {
-      name = "owner"
+      name = "object_access_control_list"
+      type = "string"
+    }
+    columns {
+      name = "object_owner"
       type = "string"
     }
 
-    columns {
-      name    = "user_metadata"
-      type    = "string"
-      comment = "JSON string containing user-defined metadata"
+    ser_de_info {
+      serialization_library = "org.apache.iceberg.mr.hive.HiveIcebergSerDe"
     }
-  }
-}
-
-# AWS Glue Crawler for Inventory Table
-resource "aws_glue_crawler" "inventory_crawler" {
-  name          = "${var.bucket_name}-inventory-crawler"
-  description   = "Crawler for S3 Tables inventory metadata"
-  role          = aws_iam_role.glue_crawler_role.arn
-  database_name = aws_glue_catalog_database.metadata_db.name
-
-  iceberg_target {
-    paths = [data.external.inventory_table_location.result.warehouse_location]
-
-    # Maximum traversal depth
-    maximum_traversal_depth = 3
-  }
-
-  # Run the crawler on a schedule (every 1 minute)
-  schedule = "cron(0/1 * * * ? *)"
-
-  # Schema change policy
-  schema_change_policy {
-    delete_behavior = "LOG"
-    update_behavior = "UPDATE_IN_DATABASE"
-  }
-
-  # Configuration for the crawler
-  configuration = jsonencode({
-    Version = 1.0
-    CrawlerOutput = {
-      Partitions = {
-        AddOrUpdateBehavior = "InheritFromTable"
-      }
-      Tables = {
-        AddOrUpdateBehavior = "MergeNewColumns"
-      }
-    }
-    Grouping = {
-      TableGroupingPolicy = "CombineCompatibleSchemas"
-    }
-  })
-
-  tags = {
-    Name        = "${var.bucket_name}-inventory-crawler"
-    Description = "Crawls S3 Tables inventory data"
   }
 
   depends_on = [
-    aws_iam_role_policy_attachment.glue_service_policy,
-    aws_iam_role_policy_attachment.glue_crawler_policy_attachment,
-    aws_glue_catalog_table.inventory_metadata
+    aws_glue_catalog_database.metadata_db,
+    aws_lakeformation_permissions.crawler_database,
+    data.external.inventory_table_location
   ]
 }
+
+# Note: Crawler removed - AWS-managed S3 Tables cannot be crawled using Glue Iceberg crawler.
+# The crawler fails with "Internal Service Exception" when trying to process the S3 Tables bucket.
+# Instead, we manage the table definition manually via aws_glue_catalog_table.inventory above.
 
 # Athena Workgroup
 resource "aws_athena_workgroup" "metadata_workgroup" {

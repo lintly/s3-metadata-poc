@@ -40,10 +40,8 @@ output "glue_database_name" {
   value       = aws_glue_catalog_database.metadata_db.name
 }
 
-output "glue_table_name" {
-  description = "Name of the Glue inventory table"
-  value       = aws_glue_catalog_table.inventory_metadata.name
-}
+# Note: Glue crawler removed - not compatible with AWS-managed S3 Tables
+# The table is managed manually via aws_glue_catalog_table.inventory
 
 output "athena_workgroup_name" {
   description = "Name of the Athena workgroup"
