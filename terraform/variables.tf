@@ -26,3 +26,9 @@ variable "cors_allowed_origins" {
     "https://s3upload.d1cusxywbulok7.amplifyapp.com"
   ]
 }
+
+variable "glue_tables_refresh_trigger" {
+  description = "Change this value to force Glue tables to refresh metadata locations. Use timestamp or version number."
+  type        = string
+  default     = "1"
+}

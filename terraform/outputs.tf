@@ -57,3 +57,8 @@ output "inventory_table_location" {
   description = "Warehouse location of the S3 Tables inventory"
   value       = data.external.inventory_table_location.result.warehouse_location
 }
+
+output "journal_table_location" {
+  description = "Warehouse location of the S3 Tables journal (near real-time updates)"
+  value       = data.external.journal_table_location.result.warehouse_location
+}

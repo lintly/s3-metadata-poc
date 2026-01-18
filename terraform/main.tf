@@ -117,6 +117,76 @@ resource "aws_iam_policy" "s3_webapp_policy" {
           "s3:ListTagsForResource"
         ]
         Resource = aws_s3_bucket.metadata_poc.arn
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "athena:StartQueryExecution",
+          "athena:GetQueryExecution",
+          "athena:GetQueryResults",
+          "athena:StopQueryExecution",
+          "athena:GetWorkGroup",
+          "athena:ListQueryExecutions",
+          "athena:GetDataCatalog",
+          "athena:GetDatabase",
+          "athena:GetTableMetadata",
+          "athena:ListDatabases",
+          "athena:ListTableMetadata"
+        ]
+        Resource = [
+          aws_athena_workgroup.metadata_workgroup.arn,
+          "arn:aws:athena:${var.aws_region}:${data.aws_caller_identity.current.account_id}:datacatalog/*",
+          "arn:aws:athena:${var.aws_region}:${data.aws_caller_identity.current.account_id}:workgroup/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetBucketLocation",
+          "s3:GetObject",
+          "s3:ListBucket",
+          "s3:PutObject"
+        ]
+        Resource = [
+          aws_s3_bucket.athena_results.arn,
+          "${aws_s3_bucket.athena_results.arn}/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "glue:GetDatabase",
+          "glue:GetTable",
+          "glue:GetTables",
+          "glue:GetPartition",
+          "glue:GetPartitions",
+          "glue:GetDatabases"
+        ]
+        Resource = [
+          "arn:aws:glue:${var.aws_region}:${data.aws_caller_identity.current.account_id}:catalog",
+          "arn:aws:glue:${var.aws_region}:${data.aws_caller_identity.current.account_id}:database/${aws_glue_catalog_database.metadata_db.name}",
+          "arn:aws:glue:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/${aws_glue_catalog_database.metadata_db.name}/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "lakeformation:GetDataAccess"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3tables:GetTableData",
+          "s3tables:GetTable",
+          "s3tables:GetTableMetadataLocation",
+          "s3tables:ListTables",
+          "s3tables:GetTableBucket",
+          "s3tables:GetNamespace",
+          "s3tables:ListNamespaces"
+        ]
+        Resource = "*"
       }
     ]
   })
@@ -227,7 +297,11 @@ resource "aws_iam_policy" "glue_crawler_policy" {
           "s3tables:GetTable",
           "s3tables:GetTableMetadataLocation",
           "s3tables:ListTables",
-          "s3tables:GetTableBucket"
+          "s3tables:GetTableBucket",
+          "s3tables:GetTableData",
+          "s3tables:ListTableBuckets",
+          "s3tables:GetNamespace",
+          "s3tables:ListNamespaces"
         ]
         Resource = "*"
       },
@@ -246,6 +320,13 @@ resource "aws_iam_policy" "glue_crawler_policy" {
           "logs:PutLogEvents"
         ]
         Resource = "arn:aws:logs:*:*:*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "lakeformation:GetDataAccess"
+        ]
+        Resource = "*"
       }
     ]
   })
@@ -264,6 +345,7 @@ resource "aws_iam_role_policy_attachment" "glue_crawler_policy_attachment" {
 }
 
 # Data source to get S3 Tables inventory metadata and warehouse location
+# The triggers block ensures this re-runs when glue_tables_refresh_trigger changes
 data "external" "inventory_table_location" {
   program = ["bash", "-c", <<-EOF
     RESULT=$(aws s3tables get-table-metadata-location \
@@ -275,7 +357,27 @@ data "external" "inventory_table_location" {
     # Extract both warehouse location and metadata location
     WAREHOUSE=$(echo $RESULT | jq -r '.warehouseLocation')
     METADATA=$(echo $RESULT | jq -r '.metadataLocation')
-    echo "{\"warehouse_location\": \"$WAREHOUSE\", \"metadata_location\": \"$METADATA\"}"
+    echo "{\"warehouse_location\": \"$WAREHOUSE\", \"metadata_location\": \"$METADATA\", \"refresh_trigger\": \"${var.glue_tables_refresh_trigger}\"}"
+  EOF
+  ]
+
+  depends_on = [aws_s3_bucket_metadata_configuration.upload]
+}
+
+# Data source to get S3 Tables journal metadata and warehouse location
+# The triggers block ensures this re-runs when glue_tables_refresh_trigger changes
+data "external" "journal_table_location" {
+  program = ["bash", "-c", <<-EOF
+    RESULT=$(aws s3tables get-table-metadata-location \
+      --table-bucket-arn "arn:aws:s3tables:${var.aws_region}:$(aws sts get-caller-identity --query Account --output text):bucket/aws-s3" \
+      --namespace "b_${var.bucket_name}" \
+      --name "journal" \
+      --region ${var.aws_region} \
+      --output json)
+    # Extract both warehouse location and metadata location
+    WAREHOUSE=$(echo $RESULT | jq -r '.warehouseLocation')
+    METADATA=$(echo $RESULT | jq -r '.metadataLocation')
+    echo "{\"warehouse_location\": \"$WAREHOUSE\", \"metadata_location\": \"$METADATA\", \"refresh_trigger\": \"${var.glue_tables_refresh_trigger}\"}"
   EOF
   ]
 
@@ -409,6 +511,298 @@ resource "aws_glue_catalog_table" "inventory" {
 # Note: Crawler removed - AWS-managed S3 Tables cannot be crawled using Glue Iceberg crawler.
 # The crawler fails with "Internal Service Exception" when trying to process the S3 Tables bucket.
 # Instead, we manage the table definition manually via aws_glue_catalog_table.inventory above.
+
+# Glue Catalog Table for S3 Tables Journal (Near Real-Time Updates)
+# Journal tables provide near real-time view of object-level changes (within minutes)
+resource "aws_glue_catalog_table" "journal" {
+  name          = "journal"
+  database_name = aws_glue_catalog_database.metadata_db.name
+
+  table_type = "EXTERNAL_TABLE"
+
+  parameters = {
+    "table_type"            = "ICEBERG"
+    "metadata_location"     = data.external.journal_table_location.result.metadata_location
+    "EXTERNAL"              = "TRUE"
+    "iceberg.catalog"       = "glue"
+    "bucketing_version"     = "2"
+  }
+
+  storage_descriptor {
+    location      = data.external.journal_table_location.result.warehouse_location
+    input_format  = "org.apache.iceberg.mr.hive.HiveIcebergInputFormat"
+    output_format = "org.apache.iceberg.mr.hive.HiveIcebergOutputFormat"
+
+    # Define columns from journal Iceberg schema
+    columns {
+      name = "bucket"
+      type = "string"
+    }
+    columns {
+      name = "key"
+      type = "string"
+    }
+    columns {
+      name = "sequence_number"
+      type = "string"
+    }
+    columns {
+      name = "record_type"
+      type = "string"
+      comment = "Type of record: CREATE, UPDATE_METADATA, or DELETE"
+    }
+    columns {
+      name = "record_timestamp"
+      type = "timestamp"
+      comment = "Timestamp associated with the record"
+    }
+    columns {
+      name = "version_id"
+      type = "string"
+    }
+    columns {
+      name = "is_delete_marker"
+      type = "boolean"
+    }
+    columns {
+      name = "size"
+      type = "bigint"
+    }
+    columns {
+      name = "last_modified_date"
+      type = "timestamp"
+    }
+    columns {
+      name = "e_tag"
+      type = "string"
+    }
+    columns {
+      name = "storage_class"
+      type = "string"
+    }
+    columns {
+      name = "is_multipart_uploaded"
+      type = "boolean"
+    }
+    columns {
+      name = "replication_status"
+      type = "string"
+    }
+    columns {
+      name = "encryption_status"
+      type = "string"
+    }
+    columns {
+      name = "object_lock_retain_until_date"
+      type = "timestamp"
+    }
+    columns {
+      name = "object_lock_mode"
+      type = "string"
+    }
+    columns {
+      name = "object_lock_legal_hold_status"
+      type = "string"
+    }
+    columns {
+      name = "intelligent_tiering_access_tier"
+      type = "string"
+    }
+    columns {
+      name = "bucket_key_status"
+      type = "string"
+    }
+    columns {
+      name = "checksum_algorithm"
+      type = "string"
+    }
+    columns {
+      name = "object_access_control_list"
+      type = "string"
+    }
+    columns {
+      name = "object_owner"
+      type = "string"
+    }
+    columns {
+      name = "user_metadata"
+      type = "map<string,string>"
+      comment = "User-defined metadata key-value pairs (x-amz-meta-* headers)"
+    }
+    columns {
+      name = "requester"
+      type = "string"
+      comment = "AWS account ID or service principal that made the request"
+    }
+    columns {
+      name = "source_ip_address"
+      type = "string"
+      comment = "Source IP address of the request"
+    }
+    columns {
+      name = "request_id"
+      type = "string"
+      comment = "Request ID associated with the request"
+    }
+
+    ser_de_info {
+      serialization_library = "org.apache.iceberg.mr.hive.HiveIcebergSerDe"
+    }
+  }
+
+  depends_on = [
+    aws_glue_catalog_database.metadata_db,
+    aws_lakeformation_permissions.crawler_database,
+    data.external.journal_table_location
+  ]
+}
+
+# IAM Role for Lake Formation Service
+resource "aws_iam_role" "lakeformation_service_role" {
+  name = "${var.bucket_name}-lakeformation-service-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "lakeformation.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = {
+    Name = "${var.bucket_name}-lakeformation-service-role"
+  }
+}
+
+# IAM Policy for Lake Formation to access S3 Tables
+resource "aws_iam_policy" "lakeformation_s3tables_policy" {
+  name        = "${var.bucket_name}-lakeformation-s3tables-policy"
+  description = "Policy for Lake Formation to access S3 Tables buckets"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "LakeFormationDataAccessPermissionsForS3TableBucket"
+        Effect = "Allow"
+        Action = [
+          "s3tables:ListTableBuckets",
+          "s3tables:GetTableBucket",
+          "s3tables:CreateNamespace",
+          "s3tables:GetNamespace",
+          "s3tables:ListNamespaces",
+          "s3tables:DeleteNamespace",
+          "s3tables:CreateTable",
+          "s3tables:DeleteTable",
+          "s3tables:GetTable",
+          "s3tables:ListTables",
+          "s3tables:GetTableData",
+          "s3tables:PutTableData",
+          "s3tables:GetTableMetadataLocation"
+        ]
+        Resource = [
+          "arn:aws:s3tables:${var.aws_region}:${data.aws_caller_identity.current.account_id}:bucket/aws-s3",
+          "arn:aws:s3tables:${var.aws_region}:${data.aws_caller_identity.current.account_id}:bucket/aws-s3/*"
+        ]
+      }
+    ]
+  })
+}
+
+# Attach Policy to Lake Formation Service Role
+resource "aws_iam_role_policy_attachment" "lakeformation_s3tables_policy" {
+  role       = aws_iam_role.lakeformation_service_role.name
+  policy_arn = aws_iam_policy.lakeformation_s3tables_policy.arn
+}
+
+# Note: S3 Tables bucket registration with Lake Formation cannot be done via
+# the standard aws_lakeformation_resource terraform resource because Lake Formation's
+# RegisterResource API does not support S3 Tables ARNs (error: "Unsupported resource path").
+#
+# S3 Tables integration with AWS analytics services must be enabled through:
+# 1. S3 Console: Bucket → Metadata tab → "Enable integration" button, OR
+# 2. AWS CLI using s3tables-specific commands (not standard Lake Formation APIs)
+#
+# Once enabled in the console, the Glue tables and Lake Formation permissions below
+# will work correctly for Athena queries.
+
+# Lake Formation Permissions for Athena to query the inventory table
+resource "aws_lakeformation_permissions" "athena_inventory_table" {
+  principal   = aws_iam_role.glue_crawler_role.arn
+  permissions = ["SELECT", "DESCRIBE"]
+
+  table {
+    database_name = aws_glue_catalog_database.metadata_db.name
+    name          = aws_glue_catalog_table.inventory.name
+  }
+
+  depends_on = [
+    aws_glue_catalog_table.inventory
+  ]
+}
+
+# Lake Formation Permissions for webapp user to query via Athena
+resource "aws_lakeformation_permissions" "webapp_user_database" {
+  principal   = aws_iam_user.s3_webapp_user.arn
+  permissions = ["DESCRIBE"]
+
+  database {
+    name = aws_glue_catalog_database.metadata_db.name
+  }
+
+  depends_on = [
+    aws_glue_catalog_database.metadata_db
+  ]
+}
+
+resource "aws_lakeformation_permissions" "webapp_user_inventory_table" {
+  principal   = aws_iam_user.s3_webapp_user.arn
+  permissions = ["SELECT", "DESCRIBE"]
+
+  table {
+    database_name = aws_glue_catalog_database.metadata_db.name
+    name          = aws_glue_catalog_table.inventory.name
+  }
+
+  depends_on = [
+    aws_glue_catalog_table.inventory
+  ]
+}
+
+# Lake Formation Permissions for Athena to query the journal table
+resource "aws_lakeformation_permissions" "athena_journal_table" {
+  principal   = aws_iam_role.glue_crawler_role.arn
+  permissions = ["SELECT", "DESCRIBE"]
+
+  table {
+    database_name = aws_glue_catalog_database.metadata_db.name
+    name          = aws_glue_catalog_table.journal.name
+  }
+
+  depends_on = [
+    aws_glue_catalog_table.journal
+  ]
+}
+
+# Lake Formation Permissions for webapp user to query journal table
+resource "aws_lakeformation_permissions" "webapp_user_journal_table" {
+  principal   = aws_iam_user.s3_webapp_user.arn
+  permissions = ["SELECT", "DESCRIBE"]
+
+  table {
+    database_name = aws_glue_catalog_database.metadata_db.name
+    name          = aws_glue_catalog_table.journal.name
+  }
+
+  depends_on = [
+    aws_glue_catalog_table.journal
+  ]
+}
 
 # Athena Workgroup
 resource "aws_athena_workgroup" "metadata_workgroup" {
