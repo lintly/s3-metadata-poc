@@ -211,6 +211,7 @@ export default function ImageUploader() {
           ContentType: file.type,
           Metadata: {
             description: description,
+            bob: "hope",
           },
         },
       });

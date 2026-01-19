@@ -7,13 +7,13 @@ variable "aws_region" {
 variable "bucket_name" {
   description = "Name of the S3 bucket"
   type        = string
-  default     = "jeff-meta-poc"
+  default     = "jeff-poc-barg"
 }
 
 variable "environment" {
   description = "Environment name for resource tagging"
   type        = string
-  default     = "development"
+  default     = "sandbox"
 }
 
 variable "cors_allowed_origins" {
@@ -25,4 +25,10 @@ variable "cors_allowed_origins" {
     "http://localhost:3000",
     "https://s3upload.d1cusxywbulok7.amplifyapp.com"
   ]
+}
+
+variable "glue_tables_refresh_trigger" {
+  description = "Change this value to force Glue tables to refresh metadata locations. Use timestamp or version number."
+  type        = string
+  default     = "1"
 }
