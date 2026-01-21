@@ -46,13 +46,13 @@ resource "aws_s3_bucket_metadata_configuration" "upload" {
 
   metadata_configuration {
     inventory_table_configuration {
-      configuration_state = "ENABLED"
+      configuration_state = "ENABLED" # ENABLED or DISABLED
     }
 
     journal_table_configuration {
       record_expiration {
-        days       = 7
-        expiration = "ENABLED"
+        days       = 7         # Valid values are from 7 to 2147483647
+        expiration = "ENABLED" # ENABLED or DISABLED
       }
     }
   }
@@ -397,11 +397,11 @@ resource "aws_glue_catalog_table" "inventory" {
   table_type = "EXTERNAL_TABLE"
 
   parameters = {
-    "table_type"            = "ICEBERG"
-    "metadata_location"     = data.external.inventory_table_location.result.metadata_location
-    "EXTERNAL"              = "TRUE"
-    "iceberg.catalog"       = "glue"
-    "bucketing_version"     = "2"
+    "table_type"        = "ICEBERG"
+    "metadata_location" = data.external.inventory_table_location.result.metadata_location
+    "EXTERNAL"          = "TRUE"
+    "iceberg.catalog"   = "glue"
+    "bucketing_version" = "2"
   }
 
   storage_descriptor {
@@ -491,8 +491,8 @@ resource "aws_glue_catalog_table" "inventory" {
       type = "string"
     }
     columns {
-      name = "user_metadata"
-      type = "map<string,string>"
+      name    = "user_metadata"
+      type    = "map<string,string>"
       comment = "User-defined metadata key-value pairs (x-amz-meta-* headers)"
     }
 
@@ -521,11 +521,11 @@ resource "aws_glue_catalog_table" "journal" {
   table_type = "EXTERNAL_TABLE"
 
   parameters = {
-    "table_type"            = "ICEBERG"
-    "metadata_location"     = data.external.journal_table_location.result.metadata_location
-    "EXTERNAL"              = "TRUE"
-    "iceberg.catalog"       = "glue"
-    "bucketing_version"     = "2"
+    "table_type"        = "ICEBERG"
+    "metadata_location" = data.external.journal_table_location.result.metadata_location
+    "EXTERNAL"          = "TRUE"
+    "iceberg.catalog"   = "glue"
+    "bucketing_version" = "2"
   }
 
   storage_descriptor {
@@ -547,13 +547,13 @@ resource "aws_glue_catalog_table" "journal" {
       type = "string"
     }
     columns {
-      name = "record_type"
-      type = "string"
+      name    = "record_type"
+      type    = "string"
       comment = "Type of record: CREATE, UPDATE_METADATA, or DELETE"
     }
     columns {
-      name = "record_timestamp"
-      type = "timestamp"
+      name    = "record_timestamp"
+      type    = "timestamp"
       comment = "Timestamp associated with the record"
     }
     columns {
@@ -625,23 +625,23 @@ resource "aws_glue_catalog_table" "journal" {
       type = "string"
     }
     columns {
-      name = "user_metadata"
-      type = "map<string,string>"
+      name    = "user_metadata"
+      type    = "map<string,string>"
       comment = "User-defined metadata key-value pairs (x-amz-meta-* headers)"
     }
     columns {
-      name = "requester"
-      type = "string"
+      name    = "requester"
+      type    = "string"
       comment = "AWS account ID or service principal that made the request"
     }
     columns {
-      name = "source_ip_address"
-      type = "string"
+      name    = "source_ip_address"
+      type    = "string"
       comment = "Source IP address of the request"
     }
     columns {
-      name = "request_id"
-      type = "string"
+      name    = "request_id"
+      type    = "string"
       comment = "Request ID associated with the request"
     }
 

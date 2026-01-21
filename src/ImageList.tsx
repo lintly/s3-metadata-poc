@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import type { MouseEvent } from "react";
+import type { MouseEvent, FormEvent } from "react";
 import {
   S3Client,
   ListObjectVersionsCommand,
@@ -8,10 +8,25 @@ import {
   GetObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import {
+  AthenaClient,
+  StartQueryExecutionCommand,
+  GetQueryExecutionCommand,
+  GetQueryResultsCommand,
+} from "@aws-sdk/client-athena";
 import ImageViewer from "./ImageViewer";
 
 // Configure S3 Client
 const s3Client = new S3Client({
+  region: import.meta.env.VITE_S3_BUCKET_REGION,
+  credentials: {
+    accessKeyId: import.meta.env.VITE_AWS_ACCESS_KEY_ID,
+    secretAccessKey: import.meta.env.VITE_AWS_SECRET_ACCESS_KEY,
+  },
+});
+
+// Configure Athena Client
+const athenaClient = new AthenaClient({
   region: import.meta.env.VITE_S3_BUCKET_REGION,
   credentials: {
     accessKeyId: import.meta.env.VITE_AWS_ACCESS_KEY_ID,
@@ -36,6 +51,8 @@ export default function ImageList() {
   const [selectedImage, setSelectedImage] = useState<S3Object | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
 
   useEffect(() => {
     fetchObjects();
@@ -182,10 +199,250 @@ export default function ImageList() {
     setSelectedImage(null);
   };
 
-  if (loading) {
+  const searchAthena = async (query: string) => {
+    if (!query.trim()) {
+      await fetchObjects();
+      return;
+    }
+
+    try {
+      setIsSearching(true);
+      setError(null);
+
+      console.log("Searching Athena for:", query);
+
+      const tableName = import.meta.env.VITE_GLUE_TABLE_NAME || "s3_metadata";
+
+      // Start Athena query execution
+      const queryString = `
+        SELECT *
+        FROM ${tableName}
+        WHERE user_metadata['description'] like '%${query.replace(/'/g, "''")}%'
+        AND is_delete_marker = false
+      `;
+
+      console.log("Athena query:", queryString);
+
+      const startQueryCommand = new StartQueryExecutionCommand({
+        QueryString: queryString,
+        QueryExecutionContext: {
+          Database: import.meta.env.VITE_GLUE_DATABASE_NAME || "s3_metadata_db",
+        },
+        ResultConfiguration: {
+          OutputLocation:
+            import.meta.env.VITE_ATHENA_OUTPUT_LOCATION ||
+            `s3://${import.meta.env.VITE_S3_BUCKET_NAME}/athena-results/`,
+        },
+        WorkGroup: import.meta.env.VITE_ATHENA_WORKGROUP,
+      });
+
+      const startResponse = await athenaClient.send(startQueryCommand);
+      const queryExecutionId = startResponse.QueryExecutionId;
+
+      if (!queryExecutionId) {
+        throw new Error("Failed to start Athena query");
+      }
+
+      console.log("Query execution ID:", queryExecutionId);
+
+      // Poll for query completion
+      let queryStatus = "RUNNING";
+      let attempts = 0;
+      const maxAttempts = 30;
+
+      while (
+        (queryStatus === "RUNNING" || queryStatus === "QUEUED") &&
+        attempts < maxAttempts
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+
+        const getQueryCommand = new GetQueryExecutionCommand({
+          QueryExecutionId: queryExecutionId,
+        });
+        const queryResponse = await athenaClient.send(getQueryCommand);
+        queryStatus = queryResponse.QueryExecution?.Status?.State || "UNKNOWN";
+
+        console.log("Query status:", queryStatus);
+        attempts++;
+      }
+
+      if (queryStatus !== "SUCCEEDED") {
+        // Get the error details
+        const getQueryCommand = new GetQueryExecutionCommand({
+          QueryExecutionId: queryExecutionId,
+        });
+        const finalQueryResponse = await athenaClient.send(getQueryCommand);
+        const errorMessage =
+          finalQueryResponse.QueryExecution?.Status?.StateChangeReason ||
+          `Query failed with status: ${queryStatus}`;
+
+        console.error("Athena query error:", errorMessage);
+        throw new Error(`Athena query failed: ${errorMessage}`);
+      }
+
+      // Get query results
+      const getResultsCommand = new GetQueryResultsCommand({
+        QueryExecutionId: queryExecutionId,
+      });
+
+      const resultsResponse = await athenaClient.send(getResultsCommand);
+      const rows = resultsResponse.ResultSet?.Rows || [];
+
+      console.log("Athena query results:", rows);
+
+      if (rows.length <= 1) {
+        setObjects([]);
+        setIsSearching(false);
+        return;
+      }
+
+      // Parse header row to get column indices
+      const headerRow = rows[0];
+      const columnNames =
+        headerRow.Data?.map((col) => col.VarCharValue || "") || [];
+      const keyIndex = columnNames.indexOf("key");
+      const versionIdIndex = columnNames.indexOf("version_id");
+      const sizeIndex = columnNames.indexOf("size");
+      const lastModifiedIndex = columnNames.indexOf("last_modified_date");
+      const userMetadataIndex = columnNames.indexOf("user_metadata");
+
+      console.log("Column indices:", {
+        keyIndex,
+        versionIdIndex,
+        sizeIndex,
+        lastModifiedIndex,
+        userMetadataIndex,
+      });
+
+      // Extract data from result rows
+      const searchResults = rows.slice(1).map((row) => {
+        const key = row.Data?.[keyIndex]?.VarCharValue || "";
+        const versionId = row.Data?.[versionIdIndex]?.VarCharValue || "";
+        const size = parseInt(row.Data?.[sizeIndex]?.VarCharValue || "0");
+        const lastModifiedStr =
+          row.Data?.[lastModifiedIndex]?.VarCharValue || "";
+        const userMetadataStr =
+          row.Data?.[userMetadataIndex]?.VarCharValue || "{}";
+
+        console.log(
+          `Processing row for key: ${key}, user_metadata: ${userMetadataStr}`,
+        );
+
+        // Parse user_metadata - Athena returns maps in format: {key1=value1, key2=value2}
+        let description = "No description";
+        try {
+          // Try JSON parse first
+          const userMetadata = JSON.parse(userMetadataStr);
+          description = userMetadata.description || "No description";
+        } catch (e) {
+          // If JSON parse fails, try parsing Athena map format: {description=value}
+          const descMatch = userMetadataStr.match(
+            /description\s*=\s*([^,}]+)/,
+          );
+          if (descMatch && descMatch[1]) {
+            description = descMatch[1].trim();
+          } else {
+            console.warn(
+              `Could not parse description from user_metadata: ${userMetadataStr}`,
+            );
+          }
+        }
+
+        return {
+          key,
+          versionId,
+          size,
+          lastModified: lastModifiedStr ? new Date(lastModifiedStr) : new Date(),
+          description,
+        };
+      });
+
+      console.log("Extracted search results:", searchResults);
+
+      // Fetch S3 metadata and generate URLs for each result
+      const objectsWithMetadata = await Promise.all(
+        searchResults.map(
+          async ({ key, versionId, size, lastModified, description }) => {
+            try {
+              // Get object metadata for content type and description
+              const headCommand = new HeadObjectCommand({
+                Bucket: import.meta.env.VITE_S3_BUCKET_NAME,
+                Key: key,
+                VersionId: versionId,
+              });
+
+              const headResponse = await s3Client.send(headCommand);
+
+              // Use description from S3 metadata if Athena parsing failed
+              const finalDescription =
+                description && description !== "No description"
+                  ? description
+                  : headResponse.Metadata?.description || "No description";
+
+              console.log(
+                `Object ${key}: Athena description="${description}", S3 description="${headResponse.Metadata?.description}", final="${finalDescription}"`,
+              );
+
+              // Generate pre-signed URL
+              const getObjectCommand = new GetObjectCommand({
+                Bucket: import.meta.env.VITE_S3_BUCKET_NAME,
+                Key: key,
+                VersionId: versionId,
+              });
+
+              const signedUrl = await getSignedUrl(
+                s3Client,
+                getObjectCommand,
+                {
+                  expiresIn: 3600,
+                },
+              );
+
+              return {
+                key,
+                description: finalDescription,
+                versionId,
+                size,
+                lastModified,
+                contentType: headResponse.ContentType || "unknown",
+                url: signedUrl,
+              };
+            } catch (error) {
+              console.error(`Error fetching metadata for ${key}:`, error);
+              return null;
+            }
+          },
+        ),
+      );
+
+      const validObjects = objectsWithMetadata.filter(
+        (obj): obj is S3Object => obj !== null,
+      );
+
+      console.log("Valid search results:", validObjects);
+      setObjects(validObjects);
+    } catch (err) {
+      console.error("Error searching Athena:", err);
+      setError(err instanceof Error ? err.message : "Failed to search objects");
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleSearch = async (e: FormEvent) => {
+    e.preventDefault();
+    await searchAthena(searchQuery);
+  };
+
+  const handleClearSearch = async () => {
+    setSearchQuery("");
+    await fetchObjects();
+  };
+
+  if (loading || isSearching) {
     return (
       <div style={{ padding: "20px", textAlign: "center" }}>
-        <p>Loading objects...</p>
+        <p>{isSearching ? "Searching..." : "Loading objects..."}</p>
       </div>
     );
   }
@@ -236,6 +493,68 @@ export default function ImageList() {
 
   return (
     <div style={{ padding: "15px", boxSizing: "border-box" }}>
+      {/* Search Form */}
+      <form
+        onSubmit={handleSearch}
+        style={{
+          marginBottom: "20px",
+          display: "flex",
+          gap: "10px",
+          flexWrap: "wrap",
+          alignItems: "center",
+        }}
+      >
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search descriptions in Athena..."
+          style={{
+            flex: "1",
+            minWidth: "250px",
+            padding: "10px 15px",
+            fontSize: "14px",
+            border: "1px solid #ccc",
+            borderRadius: "4px",
+          }}
+        />
+        <button
+          type="submit"
+          disabled={isSearching}
+          style={{
+            padding: "10px 20px",
+            backgroundColor: isSearching ? "#6c757d" : "#007bff",
+            color: "white",
+            border: "none",
+            borderRadius: "4px",
+            cursor: isSearching ? "not-allowed" : "pointer",
+            fontWeight: "bold",
+            fontSize: "14px",
+          }}
+        >
+          {isSearching ? "Searching..." : "Search"}
+        </button>
+        {searchQuery && (
+          <button
+            type="button"
+            onClick={handleClearSearch}
+            disabled={isSearching}
+            style={{
+              padding: "10px 20px",
+              backgroundColor: "#6c757d",
+              color: "white",
+              border: "none",
+              borderRadius: "4px",
+              cursor: isSearching ? "not-allowed" : "pointer",
+              fontWeight: "bold",
+              fontSize: "14px",
+            }}
+          >
+            Clear
+          </button>
+        )}
+      </form>
+
       <div
         style={{
           display: "flex",
@@ -247,7 +566,16 @@ export default function ImageList() {
           gap: "10px",
         }}
       >
-        <h2>Image/Video List ({objects.length} items)</h2>
+        <h2>
+          Image/Video List ({objects.length} items)
+          {searchQuery && (
+            <span
+              style={{ fontSize: "14px", color: "#6c757d", marginLeft: "10px" }}
+            >
+              - Filtered by: "{searchQuery}"
+            </span>
+          )}
+        </h2>
         <button
           onClick={fetchObjects}
           style={{
