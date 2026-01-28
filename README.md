@@ -12,3 +12,8 @@ tofu apply -auto-approve
 5. Need to be able to search?
 6. Permissions model
 7. Internal and external use cases
+
+1. On user uploaded images/videos, how are you thinking authorization will work?
+2. When a user uploads a file with metadata, will that metadata need to be searched on or display only?
+3. Is there anything with uploading in Horizon that we need to consider that we are not already trying to consider (structure, CRUD, CRUD metadata)?
+4.
